@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!--
+  Copyright (c) 2017, Antonin LEBRARD. All rights reserved. Use of this source code
+  is governed by a MIT license that can be found in the LICENSE file.
+-->
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authorize app</title>
+    <style>
+        html, body {
+            height: 100%;
+        }
+        html {
+            display: table;
+            margin: auto;
+        }
+        body {
+            display: table-cell;
+            vertical-align: middle;
+            font-family: sans-serif;
+        }
+        #container {
+            cursor: pointer;
+            display: table;
+            min-height: 35px;
+            min-width: 85px;
+            background: dodgerblue;
+            border-radius: 4px;
+            box-shadow: 1px 1px 6px 2px lightgrey;
+        }
+        #subContainer {
+            display: table-cell;
+            vertical-align: middle;
+            text-align: center;
+        }
+        a {
+            text-decoration: none;
+            color: white;
+        }
+    </style>
+    <script>
+        var href = "https://connect.deezer.com/oauth/auth.php?app_id=265782&redirect_uri=http://localhost:3000/oauth/&perms=manage_library"
+        window.addEventListener('load', function() {
+          document.getElementById('container').addEventListener('click', function() {
+            window.open(href, 'Connect to deezer')
+          })
+        })
+    </script>
+</head>
+<body>
+<div id="container">
+    <div id="subContainer">
+        <a id="connectA">
+            Connect
+        </a>
+    </div>
+</div>
+</body>
+</html>
