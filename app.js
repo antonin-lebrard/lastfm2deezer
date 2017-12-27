@@ -26,6 +26,15 @@ const deezerSearchUri = 'http://api.deezer.com/search/&&&TYPE&&&?q=&&&KEYWORD&&&
     deezerArtistSearch = deezerSearchUri.replace('&&&TYPE&&&', 'artist'),
     deezerAlbumSearch = deezerSearchUri.replace('&&&TYPE&&&', 'album')
 
+function optProxy(baseOpt) {
+  return {
+    host: "proxy ip here",
+    port: "proxy port here",
+    path: baseOpt.completeUrl,
+    method: baseOpt.method,
+  }
+}
+
 function req(uri, method, cb) {
   let errorCbCalled = false
   function errorCb(err) {
@@ -34,12 +43,18 @@ function req(uri, method, cb) {
       cb(err)
     }
   }
-  const { protocol, hostname, path } = url.parse(uri)
-  const opt = {
+  let { protocol, hostname, path } = url.parse(uri)
+  path = encodeURIComponent(path)
+  let opt = {
     protocol,
     hostname,
     path,
-    method: method
+    method: method,
+    completeUrl: encodeURI(uri)
+  }
+  const isBehindProxy = true /// If not behind proxy, change to false
+  if (isBehindProxy) {
+    opt = optProxy(opt)
   }
   let req = http.request(opt, res => {
     console.log(`${uri}: ${res.statusCode}`);
@@ -92,11 +107,14 @@ function getLastfmAlbums(cb) {
     return cb(null, relative.jsonRead('savelastfmalbums.json'))
   }
   console.log('fetching lastfm albums')
-  commonFetchLastFm(lastfmTopAlbums, page => page.topalbums['@attr'].totalPages, page => page.topalbums.album, (err, res) => {
-    if (err) return cb(err)
-    relative.jsonSave(res, 'savelastfmalbums.json')
-    cb(null, res)
-  })
+  commonFetchLastFm(lastfmTopAlbums,
+      page => page.topalbums['@attr'].totalPages,
+      page => page.topalbums.album,
+    (err, res) => {
+      if (err) return cb(err)
+      relative.jsonSave(res, 'savelastfmalbums.json')
+      cb(null, res)
+    })
 }
 
 function getLastfmArtist(cb) {
@@ -115,11 +133,11 @@ function commonSearchDeezer(reqUrl, cb) {
   req(reqUrl, 'GET', (err, res) => {
     if (err) return cb(err)
     const data = JSON.parse(res).data
-    const shouldBeTheOne = data[0]
-    if (shouldBeTheOne === undefined) {
+    if (data === undefined || data[0] === undefined) {
       console.error(`${reqUrl} has not found anything in deezer: the artist or album is not present on deezer`)
       return cb(null, null)
     }
+    const shouldBeTheOne = data[0]
     return cb(null, shouldBeTheOne.id)
   })
 }
@@ -132,20 +150,44 @@ function searchDeezerAlbum(name, cb) {
   commonSearchDeezer(deezerAlbumSearch.replace('&&&KEYWORD&&&', `album:"${name}"`), cb)
 }
 
+function commonGetDeezerId(lastfmData, getIdFn, cb) {
+  let ids = []
+  awaitFor(0, lastfmData.length - 1,
+    (idx, cb) => {
+      console.log(`${idx}/${lastfmData.length} done`)
+      getIdFn(lastfmData[idx], cb)
+    },
+    (res) => { if (res) ids.push(res) },
+    (err) => {
+      if (err) return cb(err)
+      cb(null, ids)
+    }
+  )
+}
+
+function getDeezerAlbumsId(lastfmAlbums, cb) {
+  if (relative.exists('savedeezeralbumsid.json')) {
+    return cb(null, relative.jsonRead('savedeezeralbumsid.json'))
+  }
+  commonGetDeezerId(lastfmAlbums,
+    (album, cb) => searchDeezerAlbum(album.name, cb),
+    (err, albumsId) => {
+      if (err) return cb(err)
+      relative.jsonSave(albumsId, 'savedeezeralbumsid.json')
+      cb(null, albumsId)
+    })
+}
+
 oauth.getCode((err, code) => {
   getLastfmAlbums((err, albums) => {
     if (err) console.error(err)
     else {
-      let albumsId = []
-      awaitFor(0, albums.length,
-        (idx, cb) => searchDeezerAlbum(albums[idx].name, cb),
-        (res) => { if (res) albumsId.push(res) },
-        (err) => {
-          if (!err) {
-            relative.jsonSave(albumsId, 'savedeezeralbumsid.json')
-          }
+      getDeezerAlbumsId(albums, (err, albumsId) => {
+        if (err) console.error(err)
+        else {
+          console.log('something done')
         }
-      )
+      })
     }
   })
 })
