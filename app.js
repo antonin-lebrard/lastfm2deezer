@@ -1,14 +1,16 @@
 'use strict'
 
-const http = require("http")
-const url = require("url")
-const fs = require('fs')
+const http = require('http')
+const https = require('https')
+const url = require('url')
 
 const oauth = require('./oauth')
 const relative = require('./relative')
 
 const user = '',
-    lastfmApiKey = ''
+    lastfmApiKey = '',
+    deezerAppId = '',
+    deezerSecret = ''
 
 const lastfmUri = 'http://ws.audioscrobbler.com/2.0/?method=user.&&&METHOD&&&&user=&&&USER&&&&api_key=&&&API_KEY&&&&page=&&&NO_PAGE&&&&format=json'
 const lastfmTopAlbums = lastfmUri
@@ -20,16 +22,46 @@ const lastfmTopArtists = lastfmUri
     .replace('&&&USER&&&', user)
     .replace('&&&API_KEY&&&', lastfmApiKey)
 
-const deezerFavAlbumUri = 'http://api.deezer.com/user/me/albums/?request_method=manage_library&album_id=&&&ALBUM_ID&&&'
-const deezerFavArtistUri = 'http://api.deezer.com/user/me/artists/?request_method=manage_library&artist_id=&&&ARTIST_ID&&&'
+const baseDeezerTokenUri = 'https://connect.deezer.com/oauth/access_token.php?app_id=&&&APP_ID&&&&secret=&&&SECRET&&&&code=&&&CODE&&&&output=json'
+const deezerTokenUri = baseDeezerTokenUri
+    .replace('&&&APP_ID&&&', deezerAppId)
+    .replace('&&&SECRET&&&', deezerSecret)
+
+const deezerFavAlbumUri = 'http://api.deezer.com/user/me/albums/?request_method=POST&album_id=&&&ALBUM_ID&&&&access_token='
+const deezerFavArtistUri = 'http://api.deezer.com/user/me/artists/?request_method=POST&artist_id=&&&ARTIST_ID&&&&access_token='
 const deezerSearchUri = 'http://api.deezer.com/search/&&&TYPE&&&?q=&&&KEYWORD&&&&strict=on',
     deezerArtistSearch = deezerSearchUri.replace('&&&TYPE&&&', 'artist'),
     deezerAlbumSearch = deezerSearchUri.replace('&&&TYPE&&&', 'album')
 
+
+function specificHttpsProxyReq(connectDeezerUri, cb) {
+  const { hostname, path } = url.parse(connectDeezerUri)
+  http.request({ // establishing a tunnel
+    host: 'proxy ip here',
+    port: 'proxy port here',
+    method: 'CONNECT',
+    path: 'deezer.com:443',
+  }).on('connect', function(res, socket, _) {
+    const req = https.get({
+      hostname,
+      path,
+      socket: socket,
+      agent: false
+    }, (res) => {
+      let data = ''
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => cb(null, data))
+      res.on('error', (err) => cb(err))
+    });
+    req.on('error', (err) => cb(err))
+  }).end();
+}
+
 function optProxy(baseOpt) {
   return {
-    host: "proxy ip here",
-    port: "proxy port here",
+    host: 'proxy ip here',
+    port: 'proxy port here',
     path: baseOpt.completeUrl,
     method: baseOpt.method,
   }
@@ -52,18 +84,24 @@ function req(uri, method, cb) {
     method: method,
     completeUrl: encodeURI(uri)
   }
-  const isBehindProxy = true /// If not behind proxy, change to false
+  const isBehindProxy = true
   if (isBehindProxy) {
     opt = optProxy(opt)
   }
   let req = http.request(opt, res => {
-    console.log(`${uri}: ${res.statusCode}`);
+    if (res.statusCode !== 200) {
+      console.log(`${uri}: ${res.statusCode}`);
+    }
     res.setEncoding('utf8')
     let data = ''
     res.on('data', chunk => {
       data += chunk
     })
-    res.on('end', () => cb(null, data))
+    res.on('end', () => {
+      if (res.statusCode !== 200)
+        return cb(data, null)
+      return cb(null, data)
+    })
     res.on('error', (err) => errorCb(err))
   })
   req.on('error', (err) => errorCb(err))
@@ -131,7 +169,10 @@ function getLastfmArtist(cb) {
 
 function commonSearchDeezer(reqUrl, cb) {
   req(reqUrl, 'GET', (err, res) => {
-    if (err) return cb(err)
+    if (err) {
+      console.error(`${reqUrl} has caused an error for the deezer api, skip this artist / album`)
+      return cb(null, null)
+    }
     const data = JSON.parse(res).data
     if (data === undefined || data[0] === undefined) {
       console.error(`${reqUrl} has not found anything in deezer: the artist or album is not present on deezer`)
@@ -178,6 +219,43 @@ function getDeezerAlbumsId(lastfmAlbums, cb) {
     })
 }
 
+function getToken(code, cb) {
+  const finalUri = deezerTokenUri.replace('&&&CODE&&&', code)
+  specificHttpsProxyReq(finalUri, (err, res) => {
+    if (err) {
+      console.error(err)
+      return cb(err)
+    }
+    cb(null, JSON.parse(res).access_token)
+  })
+}
+
+function postOneAlbum(albumId, token, cb) {
+  const finalUri = deezerFavAlbumUri.replace('&&&ALBUM_ID&&&', albumId) + token
+  req(finalUri, 'GET', (err, res) => {
+    if (err) {
+      console.error('problem with album: ' + albumId)
+      return cb(null, 'false')
+    }
+    if (res !== 'true') {
+      console.error('cannot add album: ' + albumId)
+      return cb(null, 'false')
+    }
+    cb(null, res)
+  })
+}
+
+function postAllAlbums(albumsId, token, cb) {
+  const allResult = []
+  awaitFor(0, albumsId.length - 1,
+    (idx, cb) => postOneAlbum(albumsId[idx], token, cb),
+    (res) => allResult.push(res),
+    (err) => {
+      if (err) return cb(err)
+      cb(null, allResult)
+    })
+}
+
 oauth.getCode((err, code) => {
   getLastfmAlbums((err, albums) => {
     if (err) console.error(err)
@@ -185,7 +263,14 @@ oauth.getCode((err, code) => {
       getDeezerAlbumsId(albums, (err, albumsId) => {
         if (err) console.error(err)
         else {
-          console.log('something done')
+          getToken(code, (err, token) => {
+            postAllAlbums(albumsId, token, (err, res) => {
+              if (err) console.error(err)
+              else {
+                console.log(`${res.filter((el) => el === 'false').length}/${res.length} not added`)
+              }
+            })
+          })
         }
       })
     }
