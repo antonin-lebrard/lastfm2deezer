@@ -5,7 +5,6 @@ const fs = require('fs')
 const cp = require('child_process')
 const os = require('os')
 const querystring = require('querystring')
-const relative = require('./relative')
 
 const okResponse = `
 <html>
@@ -32,7 +31,6 @@ function launchServer(cb) {
         res.end()
       }
       else if (queryParams.code !== undefined) {
-        relative.save(queryParams.code, 'code.txt')
         res.write(okResponse)
         res.end()
         server.close()
@@ -50,9 +48,6 @@ function launchServer(cb) {
 module.exports = {
 
   getCode: function(cb) {
-    if (relative.exists('code.txt')) {
-      return cb(null, relative.read('code.txt'))
-    }
     launchServer(cb)
     console.log('trying to launch browser to url: http://localhost:3000')
     console.log('if it does not open a browser, go to the url manually to authorize the app')
@@ -65,4 +60,5 @@ module.exports = {
       console.error(err)
     }
   },
+
 }
