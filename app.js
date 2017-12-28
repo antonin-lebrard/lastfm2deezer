@@ -10,7 +10,8 @@ const relative = require('./relative')
 const user = '',
     lastfmApiKey = '',
     deezerAppId = '',
-    deezerSecret = ''
+    deezerSecret = '',
+    minPlayCountAlbum = 16
 
 const lastfmUri = 'http://ws.audioscrobbler.com/2.0/?method=user.&&&METHOD&&&&user=&&&USER&&&&api_key=&&&API_KEY&&&&page=&&&NO_PAGE&&&&format=json'
 const lastfmTopAlbums = lastfmUri
@@ -150,6 +151,7 @@ function getLastfmAlbums(cb) {
       page => page.topalbums.album,
     (err, res) => {
       if (err) return cb(err)
+      res = res.filter((el) => el.playcount >= minPlayCountAlbum)
       relative.jsonSave(res, 'savelastfmalbums.json')
       cb(null, res)
     })
